@@ -8,6 +8,7 @@ import argparse
 from pathlib import Path
 import subprocess
 import time
+import Adafruit_DHT
 
 
 class RPIDeviceConfiguration:
@@ -69,10 +70,10 @@ class RPIDeviceMqtt:
 class RPIGPIODevice(RPIDeviceMqtt):
    def __init__(self,DeviceConfiguration):
      RPIDeviceMqtt.__init__(self, DeviceConfiguration)
-     self.GPIO = 0
      GPIO.setmode(GPIO.BCM)
      GPIO.setwarnings(False)
-     self.setGPIOUsed(self.data['gpio'], GPIO.OUT)
+     self.GPIO = int(self.data['gpio'])
+     GPIO.setup(self.GPIO, GPIO.OUT)
      if (self.data["backup-status"] == 1 ):
         self.loadGPIOstatus()
 
@@ -87,12 +88,7 @@ class RPIGPIODevice(RPIDeviceMqtt):
      msg = str(message.payload.decode("utf-8"))
      print("Received message '" + msg + "' on topic '"  + message.topic + "' with QoS " + str(message.qos))
      if (self.data["gpio-cmd-map"][msg] != None):
-        self.writeGPIO(self.data["gpio-cmd-map"][msg])
-
-   def setGPIOUsed(self,gpioBCM,IO):
-      GPIO.setup(gpioBCM,IO)
-      print("Controlling on GPIO %d" %  gpioBCM)
-      self.GPIO = gpioBCM
+        self.writeGPIO(int(self.data["gpio-cmd-map"][msg]))
 
    def loadGPIOstatus(self):
      backupFile = Path(self.data["backup-path"] + "/" + self.data["backup-name"])
@@ -103,7 +99,7 @@ class RPIGPIODevice(RPIDeviceMqtt):
           f.close()
           if len(pinValue) == 1:
              print("Old status was %d", int(pinValue))
-             self.sendCommand(int(pinValue))
+             self.writeGPIO(int(pinValue))
         except IOError as e:
           print("Errore (%s): %s" % (e.errno, e.strerror))
 
@@ -117,15 +113,55 @@ class RPIGPIODevice(RPIDeviceMqtt):
 
    def writeGPIO(self,value):
       print(value)
-      GPIO.output(self.gpio,value)
+      print(self.GPIO)
+      GPIO.output(self.GPIO,value)
 
    def readGPIO(self):
-      return GPIO.input(self.gpio)
+      return GPIO.input(self.GPIO)
 
 class RPISensorDeviceHumidity(RPIDeviceMqtt):
    def __init__(self, DeviceConfiguration):
       RPIDeviceMqtt.__init__(self, DeviceConfiguration)
-      pass
+      if (self.data["sensor-polling"] == None):
+         print("Missing sensor-polling parameter in configuration file")
+         exit(1)
+      if (self.data["sensor-model"] == None):
+         print("Missing sensor-model parameter in configuration file")
+         exit(1)
+      self.sensor_model = self.data["sensor-model"]
+      self.polling_time = self.data["sensor-polling"]
+      self.GPIO = self.data["gpio"]
+      self.humidity = 0
+      self.temperature = 0
+      self.last_read = 0
+ 
+   def on_connect(self,client, userdata, flags, rc):
+      print("Connected with result code "+str(rc))
+      t = threading.Thread(target=self.reading_thread_loop, args=())
+      t.start()
+
+   def reading_thread_loop(self):
+     oldTemperature  = 0
+     oldHumidity = 0
+     while True:
+       print("read from sensor %d on GPIO %d" % (self.sensor_model, self.GPIO))
+       Rhumidity, Rtemperature = Adafruit_DHT.read_retry(self.sensor_model, self.GPIO, retries = 1)
+       if (Rhumidity != None and Rtemperature != None):
+          self.temperature = int(Rtemperature)
+          self.humidity = int(Rhumidity)
+       if (oldTemperature != self.temperature ):
+             self.mqtt_client.publish(self.data["mqtt-topic-base"] + self.data["device-temperature-id"],str(self.temperature))
+             oldTemperature = self.temperature
+
+       if (oldHumidity != self.humidity ):
+             self.mqtt_client.publish(self.data["mqtt-topic-base"] + self.data["device-humidity-id"],str(self.humidity))
+             oldHumidity = self.humidity
+
+       print(self.temperature, self.humidity)
+       print(self.data["mqtt-topic-base"] + self.data["device-temperature-id"])
+       print(self.data["mqtt-topic-base"] + self.data["device-humidity-id"])
+       time.sleep(self.data["sensor-polling"])
+ 
 
 class RPIRaspberryDevice(RPIDeviceMqtt):
    def __init__(self, DeviceConfiguration):
@@ -134,14 +170,6 @@ class RPIRaspberryDevice(RPIDeviceMqtt):
          print("Missing sensor-polling parameter in configuration file")
          exit(1)
       self.polling_time = self.data["sensor-polling"]
-      self.ext_value = 0
-      self.last_read = 0
-      self.topic = ""
-      self.command = "" 
-
-   def connect(self):
-      self.mqtt_client.connect(self.data["mqtt-server"],self.data["mqtt-port"])
-      self.mqtt_client.loop_forever()
 
    def on_connect(self,client, userdata, flags, rc):
       print("Connected with result code "+str(rc))
