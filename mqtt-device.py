@@ -119,6 +119,45 @@ class RPIGPIODevice(RPIDeviceMqtt):
    def readGPIO(self):
       return GPIO.input(self.GPIO)
 
+
+class RPIDoorSensor(RPIDeviceMqtt):
+   def __init__(self, DeviceConfiguration):
+      RPIDeviceMqtt.__init__(self, DeviceConfiguration)
+      self.GPIO = self.data["gpio"]
+      print("Door sensor")
+      if (self.data["sensor-polling"] == None):
+         print("Missing sensor-polling parameter in configuration file")
+         exit(1)
+      GPIO.setmode(GPIO.BCM)
+      GPIO.setup(self.GPIO, GPIO.IN,GPIO.PUD_UP)
+      GPIO.setwarnings(False)
+
+   def __del__(self):
+      GPIO.cleanup()
+
+   def on_connect(self,client, userdata, flags, rc):
+      print("Connected with result code "+str(rc))
+      t = threading.Thread(target=self.reading_thread_loop, args=())
+      t.start()
+
+   def reading_thread_loop(self):
+     oldStatus  = 0
+     while True:
+          status =  GPIO.input(self.GPIO)
+          #print("Read from %d %d" % (self.GPIO , status ))
+          if (oldStatus != status ):
+             if (status == 1):
+                 print(self.data["mqtt-topic-base"] + self.data["device-unique-id"] + " Open")
+                 self.mqtt_client.publish(self.data["mqtt-topic-base"] + self.data["device-unique-id"],str(self.data['open-value']))
+             else:
+                 print(self.data["mqtt-topic-base"] + self.data["device-unique-id"] + " Close")
+                 self.mqtt_client.publish(self.data["mqtt-topic-base"] + self.data["device-unique-id"],str(self.data['close-value']))
+
+             oldStatus = status
+
+          time.sleep(self.data["sensor-polling"])
+   
+
 class RPISensorDeviceHumidity(RPIDeviceMqtt):
    def __init__(self, DeviceConfiguration):
       RPIDeviceMqtt.__init__(self, DeviceConfiguration)
@@ -131,9 +170,9 @@ class RPISensorDeviceHumidity(RPIDeviceMqtt):
       self.sensor_model = self.data["sensor-model"]
       self.polling_time = self.data["sensor-polling"]
       self.GPIO = self.data["gpio"]
-      self.humidity = 0
+      self.status = 0
       self.temperature = 0
-      self.last_read = 0
+      self.humidity = 0
  
    def on_connect(self,client, userdata, flags, rc):
       print("Connected with result code "+str(rc))
@@ -160,8 +199,7 @@ class RPISensorDeviceHumidity(RPIDeviceMqtt):
        print(self.temperature, self.humidity)
        print(self.data["mqtt-topic-base"] + self.data["device-temperature-id"])
        print(self.data["mqtt-topic-base"] + self.data["device-humidity-id"])
-       time.sleep(self.data["sensor-polling"])
- 
+       time.sleep(self.data["sensor-polling"]) 
 
 class RPIRaspberryDevice(RPIDeviceMqtt):
    def __init__(self, DeviceConfiguration):
@@ -196,12 +234,13 @@ class RPIRaspberryDevice(RPIDeviceMqtt):
 # switch - relay board
 # humidity - D11, D22 , Adafruit sensor
 # rp3b+ - raspberry infos
-
+# door  - door sensor
 
 deviceFamilyClassMapping = {
   "switch" : RPIGPIODevice,
   "humidity" : RPISensorDeviceHumidity,
-  "rp3b+"    : RPIRaspberryDevice}
+  "rp3b+"    : RPIRaspberryDevice,
+  "door"     : RPIDoorSensor}
 
 
 
