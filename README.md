@@ -1,4 +1,8 @@
 # mqtt-rpi-device
+Install: 
+
+pip3 install paho-mqtt python-etcd
+
 Python based service to expose through MQTT your Raspberry device
 
 Use: 
