@@ -1,0 +1,19 @@
+#!/bin/bash
+STARTUP=`pidof systemd > /dev/null && echo "systemd" || echo "other"`
+
+. default_options
+
+if [[ "$STARTUP" == "systemd" ]]; then
+    mkdir  -v -p /etc/systemd/system/mqtt-rpi.d
+    cp -v 30-mqtt-rpi.conf /etc/systemd/system/mqtt-rpi.d/
+    cp -v mqtt-rpi.service /etc/systemd/system
+    sed -i "s~%%LOGFILE%%~$LOGFILE~g"  /etc/systemd/system/mqtt-rpi.d/30-mqtt-rpi.conf
+else
+    cp -v mqtt-rpi /etc/init.d/
+    cp -v  mqtt_rpi.conf /etc/default/
+fi
+
+install -v  ../mqtt-device.py /usr/bin/
+touch ${LOGFILE}
+chown -v  ${USER}:${GROUP} ${LOGFILE}
+

@@ -1,0 +1,52 @@
+#!/bin/sh
+# Start/stop the cron daemon.
+#
+### BEGIN INIT INFO
+# Provides:          mqtt_rpi2
+# Required-Start:    $time $network $named
+# Required-Stop:     $time $network $named
+# Should-Start:      slapd autofs ypbind nscd nslcd winbind sssd
+# Should-Stop:       slapd autofs ypbind nscd nslcd winbind sssd
+# Default-Start:     2 3 4 5
+# Default-Stop:
+# Short-Description: Python Mqtt Rpi Broker
+# Description:       .
+### END INIT INFO
+
+PATH=/bin:/usr/bin:/sbin:/usr/sbin
+DESC="MQTT RPi2"
+NAME=mqtt_rpi2
+DAEMON=/usr/bin/mqtt-device.py
+PIDFILE=/var/run/mqtt-device
+SCRIPTNAME=/etc/init.d/"$NAME"
+
+
+test -f $DAEMON || exit 0
+
+[ -r /etc/default/mqtt_rpi.conf ] && . /etc/default/mqtt_rpi.conf
+
+
+case "$1" in
+start)  log_daemon_msg "Starting MQTT GPio" "mqtt_rpi2"
+        start_daemon -p $PIDFILE $DAEMON $CONFIGURATION_FILES
+        log_end_msg $?
+        ;;
+stop)   log_daemon_msg "Stopping MQTT Gpio" "mqtt_rpi2"
+        killproc -p $PIDFILE $DAEMON
+        RETVAL=$?
+        [ $RETVAL -eq 0 ] && [ -e "$PIDFILE" ] && rm -f $PIDFILE
+        log_end_msg $RETVAL
+        ;;
+restart) log_daemon_msg "Restarting MQTT Gpio" "mqtt_rpi2"
+        $0 stop
+        $0 start
+        ;;
+status)
+        status_of_proc -p $PIDFILE $DAEMON $NAME && exit 0 || exit $?
+        ;;
+*)      log_action_msg "Usage: /etc/init.d/cron {start|stop|status|restart|reload|forc                                                                                                                         e-reload}"
+        exit 2
+        ;;
+esac
+exit 0
+

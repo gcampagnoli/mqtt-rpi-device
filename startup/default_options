@@ -1,0 +1,4 @@
+LOGFILE=/var/log/mqtt.log
+USER=pi
+GROUP=pi
+

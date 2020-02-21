@@ -1,4 +1,4 @@
-#!/usr/bin/python3
+#!/usr/bin/python
 import sys
 import paho.mqtt.client as mqtt
 import json
@@ -9,6 +9,7 @@ from pathlib import Path
 import subprocess
 import time
 import Adafruit_DHT
+from filelock import Timeout, FileLock
 
 
 class RPIDeviceConfiguration:
@@ -42,6 +43,10 @@ class RPIDeviceMqtt:
       self.mqtt_client.on_subscribe = self.on_subscribe
       self.mqtt_client.on_disconnect = self.on_disconnect
       self.topic = self.data["mqtt-topic-base"] + self.data["device-unique-id"]
+      if (self.data["status-topic"] != None):
+         self.statustopic = self.data["mqtt-topic-base"] + self.data["device-unique-id"] + "/" + self.data["status-topic"]
+      else:
+         self.statustopic = None
 
    def connect(self):
       self.mqtt_client.connect(self.data["mqtt-server"],self.data["mqtt-port"])
@@ -57,6 +62,9 @@ class RPIDeviceMqtt:
       print("Connected with result code "+str(rc))
       self.subscribe_result = client.subscribe(self.topic)
       print("Subscribing to %s => %d %d" % (self.topic, self.subscribe_result[0], self.subscribe_result[1]))
+      if (self.statustopic != None):
+         self.subscribe_result = client.subscribe(self.statustopic)
+         print("Subscribing to %s => %d %d" % (self.statustopic, self.subscribe_result[0], self.subscribe_result[1]))
 
    def on_message(self,client, userdata, message):
       pass
@@ -104,6 +112,8 @@ class RPIGPIODevice(RPIDeviceMqtt):
           print("Errore (%s): %s" % (e.errno, e.strerror))
 
    def saveGPIOstatus(self,status):
+      backuppath = Path(self.data["backup-path"])
+      backuppath.mkdir(mode=0o777,parents=True, exist_ok=True)
       try:
          f = open(self.data["backup-path"] + "/" + self.data["backup-name"],"w+")
          f.write(str(status))
@@ -118,6 +128,116 @@ class RPIGPIODevice(RPIDeviceMqtt):
 
    def readGPIO(self):
       return GPIO.input(self.GPIO)
+
+class RPIRollerShutter(RPIDeviceMqtt):
+   def __init__(self, DeviceConfiguration):
+      RPIDeviceMqtt.__init__(self, DeviceConfiguration)
+      GPIO.setmode(GPIO.BCM)
+      GPIO.setwarnings(False)
+      self._position = self.loadGPIOstatus()
+      self.GPIO = int(self.data['gpio'])
+      self.GPIO_UP_DOWN = int(self.data['gpio_up_down'])
+      GPIO.setup(self.GPIO, GPIO.OUT)
+      GPIO.setup(self.GPIO_UP_DOWN, GPIO.OUT)
+      # (self.data["set-position-topic"] != None ):
+      self.positionsettopic = self.data["mqtt-topic-base"] + self.data["device-unique-id"] + "/" + self.data["set-position-topic"]
+      
+
+   def __del__(self):
+      GPIO.cleanup()
+
+   def on_message(self,client, userdata, message):
+      msg = str(message.payload.decode("utf-8"))
+      print("Received message '" + msg + "' on topic '"  + message.topic + "' with QoS " + str(message.qos))
+      print((message.topic == self.statustopic) and (self.data["status-payload"] == msg))
+      if ((message.topic == self.statustopic)):
+         print("Received status message")
+         self.mqtt_client.publish(self.statustopic,str(self._position))
+      else:
+         if (self.data["gpio-cmd-map"][msg] != None):
+             self.writeGPIO(int(self.data["gpio-cmd-map"][msg]))
+         if (self.data["gpio-stop-cmd"] == msg):
+             self.writeStopGPIO()
+         if ((message.topic == self.positionsettopic)):
+             if (int(msg) >= self.data['position_min'] and int(msg) <= self.data['position_max']):
+                self.movetoposition(int(msg))
+
+   def on_connect(self,client, userdata, flags, rc):
+      print("Connected with result code "+str(rc))
+      self.subscribe_result = client.subscribe(self.topic)
+      print("Subscribing to %s => %d %d" % (self.topic, self.subscribe_result[0], self.subscribe_result[1]))
+      self.subscribe_result = client.subscribe(self.statustopic)
+      print("Subscribing to %s => %d %d" % (self.statustopic, self.subscribe_result[0], self.subscribe_result[1]))
+      self.subscribe_result = client.subscribe(self.positionsettopic)
+      print("Subscribing to %s => %d %d" % (self.positionsettopic, self.subscribe_result[0], self.subscribe_result[1]))
+
+
+   def loadGPIOstatus(self):
+     backupFile = Path(self.data["backup-path"] + "/" + self.data["backup-name"])
+     if backupFile.is_file():
+        f = open(self.data["backup-path"] + "/" + self.data["backup-name"], "r")
+        try:
+          position = f.read(10)
+          f.close()
+          print("Old status was " + position)
+          return int(position)
+        except IOError as e:
+          print("Errore (%s): %s" % (e.errno, e.strerror))
+     else:
+        return 0
+
+   def movetoposition(self,newpos):
+      if (newpos != self._position):
+         if (newpos > self._position):
+            GPIO.output(self.GPIO_UP_DOWN,value)
+            GPIO.output(self.GPIO,0)
+            time.sleep((newpos - self._position) * 2)
+            GPIO.output(self.GPIO,1)
+         else:
+            GPIO.output(self.GPIO_UP_DOWN,value)
+            GPIO.output(self.GPIO,0)
+            time.sleep((self._position - newpos ) * 2)
+            GPIO.output(self.GPIO,1)
+
+
+   def saveGPIOstatus(self,status):
+      backuppath = Path(self.data["backup-path"])
+      backuppath.mkdir(mode=0o777,parents=True, exist_ok=True)
+      try:
+         f = open(self.data["backup-path"] + "/" + self.data["backup-name"],"w+")
+         f.write(str(status))
+         f.close()
+      except IOError as e:
+          print("Errore (%s): %s" % (e.errno, e.strerror))
+
+   def writeStopGPIO(self):
+      GPIO.output(self.GPIO,1)
+
+   def writeGPIO(self,value):
+      print(value)
+      print(self.GPIO)
+      print(str(self._position) + " " + str(self.data['position_min']) + " " + str(self.data['position_max']))
+      if (value == 1 and self._position > int(self.data['position_min']) ):
+         print('Abbasso serranda')
+         GPIO.output(self.GPIO_UP_DOWN,value)
+         GPIO.output(self.GPIO,0)
+         time.sleep(2)
+         GPIO.output(self.GPIO,1)
+         self._position -= 1
+      if (value == 0 and self._position < int(self.data['position_max']) ):
+         print('Alzo serranda')
+         GPIO.output(self.GPIO_UP_DOWN,value)
+         GPIO.output(self.GPIO,0)
+         time.sleep(2)
+         GPIO.output(self.GPIO,1)
+         self._position += 1
+         print(self._position)
+      self.saveGPIOstatus(self._position)
+
+
+   def readGPIO(self):
+      return GPIO.input(self.GPIO)
+ 
 
 
 class RPIDoorSensor(RPIDeviceMqtt):
@@ -201,6 +321,9 @@ class RPISensorDeviceHumidity(RPIDeviceMqtt):
        print(self.data["mqtt-topic-base"] + self.data["device-humidity-id"])
        time.sleep(self.data["sensor-polling"]) 
 
+
+
+
 class RPIRaspberryDevice(RPIDeviceMqtt):
    def __init__(self, DeviceConfiguration):
       RPIDeviceMqtt.__init__(self, DeviceConfiguration)
@@ -240,7 +363,8 @@ deviceFamilyClassMapping = {
   "switch" : RPIGPIODevice,
   "humidity" : RPISensorDeviceHumidity,
   "rp3b+"    : RPIRaspberryDevice,
-  "door"     : RPIDoorSensor}
+  "door"     : RPIDoorSensor,
+  "roller"   : RPIRollerShutter}
 
 
 
@@ -265,14 +389,32 @@ def starter(configFile):
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--conf', nargs='+')
+parser.add_argument('--listfile', nargs='+')
+startup=False
 
 for param, value in parser.parse_args()._get_kwargs():
-    if  param.upper() == "CONF" and value == None:
-        print("Parameter missing : conf\nUsage %s --conf [configfile]" % sys.argv[0])
-        exit(1)
-    else:
-        configs = value
+    if  (param.upper() == "CONF" and value != None):
+        print("ciao")
+        configs=value
+        startup=True
+    if  (param.upper() == "LISTFILE" and value != None):
+        print("cioao")
+        startup=True
+        try:
+           with open(str(value)) as json_file:
+              listdata = json.load(json_file)
+        except ValueError as e:
+           print('Your settings file(s) contain invalid JSON syntax! Please fix and restart!, {}'.format(str(e)))
+           sys.exit(0)
 
+
+if  (startup==False):
+    parser.print_help()
+    sys.exit(0)
+
+
+
+sys.exit()
 
 threads = []
 for i in range(len(configs)):

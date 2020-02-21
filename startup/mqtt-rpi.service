@@ -1,0 +1,14 @@
+[Unit]
+Description=Mqtt Rpi Broker
+Wants=network.target
+
+[Service]
+User=pi
+Group=pi
+Type=simple
+EnvironmentFile=/etc/systemd/system/mqtt-rpi.d/30-mqtt-rpi.conf
+PIDFile=/run/mqtt-rpi.pid
+ExecStart=/usr/bin/mqtt-device.py --conf ${CONFIGURATION_FILES}
+
+[Install]
+WantedBy=multi-user.target
