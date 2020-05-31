@@ -1,0 +1,8 @@
+{ "files" : [ "/home/pi/mqtt-rpi-device/relay_board/domo05.conf",
+              "/home/pi/mqtt-rpi-device/relay_board/domo04.conf",
+              "/home/pi/mqtt-rpi-device/relay_board/domo03.conf",
+              "/home/pi/mqtt-rpi-device/relay_board/domo02.conf",
+              "/home/pi/mqtt-rpi-device/relay_board/domo01.conf",
+              "/home/pi/mqtt-rpi-device/relay_board/domo06.conf",
+              "/home/pi/mqtt-rpi-device/pc_status/pc01.conf"
+]}

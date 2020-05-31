@@ -1,4 +1,5 @@
 LOGFILE=/var/log/mqtt.log
 USER=pi
 GROUP=pi
+CONFIGURATION_FILE=/etc/mqtt/DeviceToStart.list
 
