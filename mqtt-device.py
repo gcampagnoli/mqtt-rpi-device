@@ -540,6 +540,15 @@ def get_methods(object, spacing=20):
 
 #exit(0)
 
+def getKeysByValue(dictOfElements, valueToFind):
+    listOfKeys = list()
+    listOfItems = dictOfElements.items()
+    for item  in listOfItems:
+        if item[1] == valueToFind:
+            listOfKeys.append(item[0])
+    return  listOfKeys
+
+
 parser = argparse.ArgumentParser()
 parser.add_argument('--conf', nargs='+')
 parser.add_argument('--listfile', nargs='+')
